@@ -14,6 +14,12 @@ type Investment struct {
 	expected_return      decimal.Decimal
 }
 
+type Assets struct {
+	investments      []Investment
+	monthly_income   int64
+	monthly_expenses int64
+}
+
 func get_expenses(config map[string]interface{}) float64 {
 	expenses, ok := config["expenses"].(map[interface{}]interface{})
 	if !ok {
@@ -71,7 +77,7 @@ func get_investments_total_balance(config map[string]interface{}) []Investment {
 
 		expected, ok := account["expected_return"].(float64)
 
-		expected_return := decimal.NewFromFloat(expected)
+		expected_return := decimal.NewFromFloat(expected / 100)
 		new_investment.expected_return = expected_return
 
 		monthly, ok := account["monthly_contribution"].(float64)
@@ -87,14 +93,60 @@ func get_investments_total_balance(config map[string]interface{}) []Investment {
 }
 
 func print_investments(investments []Investment) {
+	tot_assets := 0
 	for _, investment := range investments {
 		fmt.Printf("%s\n", investment.name)
 		fmt.Println(investment.balance)
 		fmt.Println(investment.monthly_contribution)
 		fmt.Println(investment.expected_return)
 		fmt.Println()
+		tot_assets += int(investment.balance.InexactFloat64())
+	}
+	fmt.Printf("Total assets %d", tot_assets)
+
+}
+
+func get_income(config map[string]interface{}) int64 {
+	expenses, ok := config["income"].(map[interface{}]interface{})
+	if !ok {
+		fmt.Println("income")
+		return 0.0
 	}
 
+	var income int64 = 0.0
+	for _, amount := range expenses {
+		switch v := amount.(type) {
+		case int:
+			income += int64(v)
+		case int64:
+			income += int64(v)
+		default:
+			fmt.Printf("Unexpected type %T for value %v\n", v, v)
+		}
+	}
+
+	return income
+}
+
+func step_investments(assets *Assets, num_months int) {
+	investments := &assets.investments
+	for range num_months {
+		for i := range *investments {
+			(*investments)[i].balance = (*investments)[i].balance.Add((*investments)[i].balance.Mul((*investments)[i].expected_return).Div((decimal.NewFromInt(12))))
+			(*investments)[i].balance = (*investments)[i].balance.Add((*investments)[i].monthly_contribution)
+			if (*investments)[i].name == "cash" {
+				net_income := decimal.NewFromInt(assets.monthly_income - assets.monthly_expenses)
+				fmt.Printf("added %f to cash\n", net_income.InexactFloat64())
+				// need to subtract monthly contributions
+				// or add that to expenses
+				(*investments)[i].balance = (*investments)[i].balance.Add(net_income)
+
+			}
+			if (*investments)[i].name == "401k" {
+				(*investments)[i].balance = (*investments)[i].balance.Add(decimal.NewFromFloat(float64(assets.monthly_income) * float64(.085)))
+			}
+		}
+	}
 }
 
 func main() {
@@ -116,7 +168,17 @@ func main() {
 		fmt.Printf("Unmarshal: %v", err)
 	}
 	var tot_expenses float64 = get_expenses(obj)
+
 	var investments []Investment = get_investments_total_balance(obj)
+	for _, investment := range investments {
+		if investment.name != "401k" {
+			tot_expenses += investment.monthly_contribution.InexactFloat64()
+		}
+	}
+	income := get_income(obj)
+
+	my_assets := Assets{investments: investments, monthly_expenses: int64(tot_expenses), monthly_income: income}
+	step_investments(&my_assets, 36)
 
 	fmt.Printf("Got total expenses per month of %f\n\n", tot_expenses)
 
